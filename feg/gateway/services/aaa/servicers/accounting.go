@@ -140,10 +140,7 @@ func (srv *accountingService) Stop(_ context.Context, req *protos.StopRequest) (
 		}
 		metrics.EndSession.WithLabelValues(apn, imsi, msisdn).Inc()
 	} else {
-		deleteRequest := &orcprotos.DeleteRecordRequest{
-			Id: sessionImsi,
-		}
-		directoryd.DeleteRecord(deleteRequest)
+		deleteSessionFromDirectoryD(sessionImsi)
 	}
 	metrics.AcctStop.WithLabelValues(apn, imsi, msisdn).Inc()
 
@@ -215,6 +212,7 @@ func (srv *accountingService) TerminateSession(
 		return &protos.AcctResp{}, Errorf(
 			codes.InvalidArgument, "Mismatched IMSI: %s != %s of session %s", req.GetImsi(), imsi, sid)
 	}
+	deleteSessionFromDirectoryD(imsi)
 	err := srv.dae.Disconnect(sctx)
 	if err != nil {
 		err = Errorf(codes.Internal, "Terminate Session Radius Disconnect error: %v", err)
@@ -242,10 +240,7 @@ func (srv *accountingService) EndTimedOutSession(aaaCtx *protos.Context) error {
 		_, err = session_manager.EndSession(req)
 		metrics.EndSession.WithLabelValues(aaaCtx.GetApn(), metrics.DecorateIMSI(aaaCtx.GetImsi()), aaaCtx.GetMsisdn()).Inc()
 	} else {
-		deleteRequest := &orcprotos.DeleteRecordRequest{
-			Id: aaaCtx.GetImsi(),
-		}
-		directoryd.DeleteRecord(deleteRequest)
+		deleteSessionFromDirectoryD(aaaCtx.GetImsi())
 	}
 	radErr = srv.dae.Disconnect(aaaCtx)
 	if radErr != nil {
@@ -280,6 +275,17 @@ func (srv *accountingService) AddSessions(ctx context.Context, sessions *protos.
 		return &protos.AcctResp{}, fmt.Errorf("Unable to add the session for the following IMSIs: %v", failed)
 	}
 	return &protos.AcctResp{}, nil
+}
+
+func deleteSessionFromDirectoryD(imsi string) {
+	glog.V(0).Infof("deleteSessionFromDirectoryD %s", imsi)
+	deleteRequest := &orcprotos.DeleteRecordRequest{
+		Id: imsi,
+	}
+	err := directoryd.DeleteRecord(deleteRequest)
+	if err != nil {
+		glog.Errorf("Failed to delete %s from DirectoryD: %s", imsi, err)
+	}
 }
 
 // installMacFlow installs a new mac flow if it is a brand new session or
